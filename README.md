@@ -117,6 +117,10 @@ meeting-mind/
 └── ...
 ```
 
+## 📝 Related Article
+
+- [人事がClaude Codeで介護記録SaaSを作ってみた](https://qiita.com/takepon7/items/aab9486f8e3d2b807e4e) - Qiita
+
 ## License
 
 MIT — see [LICENSE](LICENSE) for details.
