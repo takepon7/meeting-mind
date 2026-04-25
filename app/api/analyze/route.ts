@@ -1,8 +1,19 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { headers } from "next/headers";
 
 export const runtime = "nodejs";
 
 const client = new Anthropic();
+
+const RATE_LIMIT = 10;
+const RATE_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+const MAX_TEXT_LENGTH = 5000;
+
+interface RateLimitEntry {
+  count: number;
+  resetAt: number;
+}
+const ipRateMap = new Map<string, RateLimitEntry>();
 
 const SYSTEM_PROMPT = `あなたは会議分析の専門家です。以下の会議内容から以下をJSON形式で抽出してください：
 {
@@ -15,6 +26,37 @@ const SYSTEM_PROMPT = `あなたは会議分析の専門家です。以下の会
 日本語で回答してください。JSON以外の文字（説明文・コードフェンスなど）は一切出力せず、JSONオブジェクトのみを返してください。`;
 
 export async function POST(request: Request) {
+  const headersList = await headers();
+  const ip =
+    headersList.get("x-forwarded-for")?.split(",")[0].trim() ??
+    headersList.get("x-real-ip") ??
+    "unknown";
+
+  const now = Date.now();
+  const entry = ipRateMap.get(ip);
+  let current: RateLimitEntry;
+
+  if (!entry || now >= entry.resetAt) {
+    current = { count: 1, resetAt: now + RATE_WINDOW_MS };
+    ipRateMap.set(ip, current);
+  } else {
+    entry.count += 1;
+    current = entry;
+  }
+
+  const remaining = Math.max(0, RATE_LIMIT - current.count);
+  const rateLimitHeaders = {
+    "X-RateLimit-Limit": String(RATE_LIMIT),
+    "X-RateLimit-Remaining": String(remaining),
+  };
+
+  if (current.count > RATE_LIMIT) {
+    return Response.json(
+      { error: "Too many requests. Please try again later." },
+      { status: 429, headers: rateLimitHeaders },
+    );
+  }
+
   let body: unknown;
   try {
     body = await request.json();
@@ -26,6 +68,13 @@ export async function POST(request: Request) {
   if (typeof meetingText !== "string" || meetingText.trim().length === 0) {
     return Response.json(
       { error: "meeting_text is required" },
+      { status: 400 },
+    );
+  }
+
+  if (meetingText.length > MAX_TEXT_LENGTH) {
+    return Response.json(
+      { error: `meeting_text must be ${MAX_TEXT_LENGTH} characters or fewer` },
       { status: 400 },
     );
   }
@@ -64,6 +113,7 @@ export async function POST(request: Request) {
     headers: {
       "Content-Type": "text/plain; charset=utf-8",
       "Cache-Control": "no-store",
+      ...rateLimitHeaders,
     },
   });
 }
