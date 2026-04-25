@@ -175,8 +175,57 @@ export default function AnalyzePage() {
 }
 
 function ResultPanel({ result }: { result: AnalysisResult }) {
+  const [copied, setCopied] = useState(false);
+
+  function buildCopyText(): string {
+    const lines: string[] = [];
+
+    lines.push("【議事録サマリー】");
+    lines.push(result.summary || "（要約はありませんでした）");
+
+    if (result.decisions && result.decisions.length > 0) {
+      lines.push("");
+      lines.push("【決定事項】");
+      result.decisions.forEach((d) => lines.push(`・${d}`));
+    }
+
+    if (result.action_items && result.action_items.length > 0) {
+      lines.push("");
+      lines.push("【アクションアイテム】");
+      result.action_items.forEach((item) => {
+        const parts = [item.title];
+        if (item.assignee) parts.push(`担当：${item.assignee}`);
+        if (item.due_date) parts.push(`期日：${item.due_date}`);
+        lines.push(`・${parts.join("、")}`);
+      });
+    }
+
+    if (result.next_steps && result.next_steps.length > 0) {
+      lines.push("");
+      lines.push("【次のステップ】");
+      result.next_steps.forEach((s) => lines.push(`・${s}`));
+    }
+
+    return lines.join("\n");
+  }
+
+  async function handleCopy() {
+    await navigator.clipboard.writeText(buildCopyText());
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
   return (
     <div className="mt-8 space-y-6">
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={handleCopy}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-gray-300 transition hover:bg-white/10 hover:text-white"
+        >
+          {copied ? "✓ コピーしました" : "結果をコピー"}
+        </button>
+      </div>
       <Section title="📋 議事録サマリー">
         <p className="leading-relaxed text-gray-200">
           {result.summary || "（要約はありませんでした）"}
