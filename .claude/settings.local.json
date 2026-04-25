@@ -2,7 +2,15 @@
   "permissions": {
     "allow": [
       "Bash(gh auth *)",
-      "Bash(npx create-next-app@latest . --typescript --tailwind --app --no-git --yes)"
+      "Bash(npx create-next-app@latest . --typescript --tailwind --app --no-git --yes)",
+      "Bash(npm install *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(gh repo *)",
+      "Skill(claude-api)",
+      "Bash(npx tsc *)",
+      "Bash(npx eslint *)",
+      "Bash(npm run *)"
     ]
   }
 }
