@@ -1,19 +1,11 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { headers } from "next/headers";
+import { createClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
-const client = new Anthropic();
-
-const RATE_LIMIT = 10;
-const RATE_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+const anthropic = new Anthropic();
 const MAX_TEXT_LENGTH = 5000;
-
-interface RateLimitEntry {
-  count: number;
-  resetAt: number;
-}
-const ipRateMap = new Map<string, RateLimitEntry>();
+const FREE_LIMIT = 5;
 
 const SYSTEM_PROMPT = `あなたは会議分析の専門家です。以下の会議内容から以下をJSON形式で抽出してください：
 {
@@ -26,35 +18,42 @@ const SYSTEM_PROMPT = `あなたは会議分析の専門家です。以下の会
 日本語で回答してください。JSON以外の文字（説明文・コードフェンスなど）は一切出力せず、JSONオブジェクトのみを返してください。`;
 
 export async function POST(request: Request) {
-  const headersList = await headers();
-  const ip =
-    headersList.get("x-forwarded-for")?.split(",")[0].trim() ??
-    headersList.get("x-real-ip") ??
-    "unknown";
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  const now = Date.now();
-  const entry = ipRateMap.get(ip);
-  let current: RateLimitEntry;
-
-  if (!entry || now >= entry.resetAt) {
-    current = { count: 1, resetAt: now + RATE_WINDOW_MS };
-    ipRateMap.set(ip, current);
-  } else {
-    entry.count += 1;
-    current = entry;
+  if (!user) {
+    return Response.json({ error: "ログインが必要です" }, { status: 401 });
   }
 
-  const remaining = Math.max(0, RATE_LIMIT - current.count);
-  const rateLimitHeaders = {
-    "X-RateLimit-Limit": String(RATE_LIMIT),
-    "X-RateLimit-Remaining": String(remaining),
-  };
+  // Check monthly usage for free plan users
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("plan")
+    .eq("id", user.id)
+    .single();
 
-  if (current.count > RATE_LIMIT) {
-    return Response.json(
-      { error: "Too many requests. Please try again later." },
-      { status: 429, headers: rateLimitHeaders },
-    );
+  const plan = profile?.plan ?? "free";
+
+  if (plan === "free") {
+    const monthYear = new Date().toISOString().slice(0, 7);
+    const { count } = await supabase
+      .from("usage_logs")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", user.id)
+      .eq("month_year", monthYear);
+
+    if ((count ?? 0) >= FREE_LIMIT) {
+      return Response.json(
+        {
+          error: `今月の無料利用上限（月${FREE_LIMIT}回）に達しました。`,
+          used: count,
+          limit: FREE_LIMIT,
+        },
+        { status: 429 },
+      );
+    }
   }
 
   let body: unknown;
@@ -79,7 +78,14 @@ export async function POST(request: Request) {
     );
   }
 
-  const stream = client.messages.stream({
+  // Log usage before streaming to prevent concurrent abuse
+  const monthYear = new Date().toISOString().slice(0, 7);
+  await supabase.from("usage_logs").insert({
+    user_id: user.id,
+    month_year: monthYear,
+  });
+
+  const stream = anthropic.messages.stream({
     model: "claude-sonnet-4-5",
     max_tokens: 2000,
     system: SYSTEM_PROMPT,
@@ -101,9 +107,7 @@ export async function POST(request: Request) {
         controller.close();
       } catch (err) {
         const message = err instanceof Error ? err.message : "stream error";
-        controller.enqueue(
-          encoder.encode(`\n\n[ERROR] ${message}`),
-        );
+        controller.enqueue(encoder.encode(`\n\n[ERROR] ${message}`));
         controller.close();
       }
     },
@@ -113,7 +117,6 @@ export async function POST(request: Request) {
     headers: {
       "Content-Type": "text/plain; charset=utf-8",
       "Cache-Control": "no-store",
-      ...rateLimitHeaders,
     },
   });
 }

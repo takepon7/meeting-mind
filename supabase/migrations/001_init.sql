@@ -6,13 +6,25 @@ create extension if not exists "pgcrypto";
 -- profiles: 1:1 with auth.users
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
-  email text unique not null,
+  email text,
   full_name text,
   avatar_url text,
   company text,
+  plan text not null default 'free',
+  stripe_customer_id text,
+  stripe_subscription_id text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+-- usage_logs: one row per analysis request, scoped by month
+create table if not exists public.usage_logs (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  used_at timestamptz default now(),
+  month_year text not null -- e.g. '2026-04'
+);
+create index if not exists usage_logs_user_month_idx on public.usage_logs(user_id, month_year);
 
 -- meetings: raw input submitted by a user
 create table if not exists public.meetings (
@@ -52,6 +64,7 @@ create index if not exists action_items_due_date_idx on public.action_items(due_
 
 -- Row Level Security
 alter table public.profiles enable row level security;
+alter table public.usage_logs enable row level security;
 alter table public.meetings enable row level security;
 alter table public.meeting_results enable row level security;
 alter table public.action_items enable row level security;
@@ -63,6 +76,10 @@ create policy "profiles_insert_own" on public.profiles
   for insert with check (auth.uid() = id);
 create policy "profiles_update_own" on public.profiles
   for update using (auth.uid() = id);
+
+-- usage_logs: user can view and insert their own logs
+create policy "Users can view own usage" on public.usage_logs
+  for all using (auth.uid() = user_id);
 
 -- meetings: owner-only access
 create policy "meetings_select_own" on public.meetings
@@ -114,12 +131,13 @@ security definer
 set search_path = public
 as $$
 begin
-  insert into public.profiles (id, email, full_name, avatar_url)
+  insert into public.profiles (id, email, full_name, avatar_url, plan)
   values (
     new.id,
     new.email,
     new.raw_user_meta_data->>'full_name',
-    new.raw_user_meta_data->>'avatar_url'
+    new.raw_user_meta_data->>'avatar_url',
+    'free'
   )
   on conflict (id) do nothing;
   return new;

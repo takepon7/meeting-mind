@@ -12,7 +12,9 @@
       "Bash(npx eslint *)",
       "Bash(npm run *)",
       "Bash(npx --no next build)",
-      "Bash(node_modules/.bin/next build *)"
+      "Bash(node_modules/.bin/next build *)",
+      "Bash(npm ls *)",
+      "Bash(node *)"
     ]
   }
 }

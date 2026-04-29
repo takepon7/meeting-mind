@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 
 type ActionItem = {
   title: string;
@@ -16,6 +18,13 @@ type AnalysisResult = {
   action_items?: ActionItem[];
   next_steps?: string[];
   key_topics?: string[];
+};
+
+type UsageInfo = {
+  authenticated: boolean;
+  used: number;
+  limit: number | null;
+  plan: "free" | "pro";
 };
 
 const SAMPLE_TEXT = `2024年Q4売上レビュー会議
@@ -33,14 +42,37 @@ function extractJson(text: string): string {
 }
 
 export default function AnalyzePage() {
+  const router = useRouter();
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(false);
   const [streamed, setStreamed] = useState("");
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [usage, setUsage] = useState<UsageInfo | null>(null);
+
+  useEffect(() => {
+    fetch("/api/usage/check")
+      .then((r) => r.json())
+      .then((data: UsageInfo) => setUsage(data))
+      .catch(() => {});
+  }, [result]);
+
+  async function handleSignOut() {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    router.push("/");
+    router.refresh();
+  }
 
   async function handleAnalyze() {
     if (!text.trim() || loading) return;
+
+    // Enforce free plan limit (authenticated users only)
+    if (usage?.authenticated && usage.plan === "free" && usage.limit !== null && usage.used >= usage.limit) {
+      setError("__limit_exceeded__");
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setResult(null);
@@ -72,6 +104,10 @@ export default function AnalyzePage() {
       try {
         const parsed = JSON.parse(extractJson(acc)) as AnalysisResult;
         setResult(parsed);
+        // Log usage for authenticated users (best-effort, non-blocking)
+        if (usage?.authenticated) {
+          fetch("/api/usage/log", { method: "POST" }).catch(() => {});
+        }
       } catch {
         setError(
           "AIの応答をJSONとして解析できませんでした。もう一度お試しください。",
@@ -94,15 +130,28 @@ export default function AnalyzePage() {
           >
             ← トップに戻る
           </Link>
-          <span className="text-sm font-medium text-violet-300">
-            MeetingMind AI
-          </span>
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-medium text-violet-300">
+              MeetingMind AI
+            </span>
+            {usage?.authenticated && (
+              <button
+                type="button"
+                onClick={handleSignOut}
+                className="rounded-md border border-white/10 bg-white/5 px-3 py-1 text-xs text-gray-400 transition hover:bg-white/10 hover:text-white"
+              >
+                ログアウト
+              </button>
+            )}
+          </div>
         </div>
 
         <h1 className="text-3xl font-bold sm:text-4xl">会議内容を分析</h1>
         <p className="mt-2 text-gray-400">
           会議メモやトランスクリプトを貼り付けて、AIに解析させましょう。
         </p>
+
+        {usage?.authenticated && <UsageBanner usage={usage} />}
 
         <div className="mt-8 rounded-2xl border border-white/10 bg-white/[0.03] p-5">
           <div className="mb-3 flex items-center justify-between">
@@ -151,11 +200,23 @@ export default function AnalyzePage() {
           </div>
         </div>
 
-        {error && (
+        {error === "__limit_exceeded__" ? (
+          <div className="mt-6 rounded-xl border border-amber-500/40 bg-amber-500/10 p-5">
+            <p className="text-sm text-amber-200">
+              今月の無料枠（5回）を使い切りました。Proプランにアップグレードすると無制限でご利用いただけます。
+            </p>
+            <Link
+              href="/pricing"
+              className="mt-3 inline-block rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-500"
+            >
+              プランを見る
+            </Link>
+          </div>
+        ) : error ? (
           <div className="mt-6 rounded-xl border border-red-500/40 bg-red-500/10 p-4 text-sm text-red-300">
             {error}
           </div>
-        )}
+        ) : null}
 
         {loading && !result && streamed && (
           <div className="mt-6 rounded-xl border border-white/10 bg-white/[0.03] p-4">
@@ -170,6 +231,33 @@ export default function AnalyzePage() {
 
         {result && <ResultPanel result={result} />}
       </div>
+    </div>
+  );
+}
+
+function UsageBanner({ usage }: { usage: UsageInfo }) {
+  if (usage.plan === "pro") {
+    return (
+      <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-gray-400">
+        今月の利用回数：<span className="font-medium text-white">{usage.used}回</span>
+        （Proプラン・無制限）
+      </div>
+    );
+  }
+  const remaining = (usage.limit ?? 5) - usage.used;
+  return (
+    <div
+      className={`mt-4 rounded-xl border px-4 py-2.5 text-sm ${
+        remaining <= 0
+          ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
+          : "border-white/10 bg-white/[0.03] text-gray-400"
+      }`}
+    >
+      今月の残り回数：
+      <span className="font-medium text-white">
+        {Math.max(remaining, 0)}回 / {usage.limit}回
+      </span>
+      （無料プラン）
     </div>
   );
 }

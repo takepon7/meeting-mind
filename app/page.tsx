@@ -20,12 +20,24 @@ export default function Home() {
           テキストを貼るだけで議事録・アクションアイテムを自動生成
         </p>
 
-        <Link
-          href="/analyze"
-          className="mt-10 inline-flex h-14 items-center justify-center rounded-full bg-violet-600 px-10 text-base font-semibold text-white shadow-lg shadow-violet-600/30 transition hover:bg-violet-500 hover:shadow-violet-500/40"
-        >
-          無料で試す
-        </Link>
+        <p className="text-sm text-violet-300">
+          無料で5回/月まで試せます。
+        </p>
+
+        <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+          <Link
+            href="/auth/signup"
+            className="inline-flex h-12 items-center justify-center rounded-full bg-violet-600 px-8 text-sm font-semibold text-white shadow-lg shadow-violet-600/30 transition hover:bg-violet-500 hover:shadow-violet-500/40"
+          >
+            無料で始める
+          </Link>
+          <Link
+            href="/auth/login"
+            className="inline-flex h-12 items-center justify-center rounded-full border border-white/10 bg-white/5 px-8 text-sm font-semibold text-white transition hover:bg-white/10"
+          >
+            ログイン
+          </Link>
+        </div>
       </section>
 
       {/* How it works */}
